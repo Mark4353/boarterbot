@@ -3,9 +3,9 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
 from app.models import get_user_by_telegram_id
-from app.keyboards import kb_nav, kb_main_menu
+from app.keyboards import kb_nav_menu_help, kb_main_menu, kb_orders_list, kb_order_detail
 from app.states import CreateOrder
-from app.order_repo import create_order
+from app.order_repo import create_order, list_orders_for_client, get_order_for_client
 
 router = Router()
 
@@ -71,8 +71,53 @@ async def create_order_start(call: CallbackQuery, state: FSMContext):
         call,
         state,
         "Введите название заказа:",
-        reply_markup=kb_nav(cancel="order:cancel"),
+        reply_markup=kb_nav_menu_help(back="order:back:menu"),
     )
+
+@router.callback_query(F.data.startswith("order:back:"))
+async def create_order_back(call: CallbackQuery, state: FSMContext):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    if user.role != "client":
+        await state.clear()
+        await call.message.answer("Создание заказа доступно только заказчику.")
+        await call.answer()
+        return
+
+    action = call.data.split(":")[-1]
+    await call.answer()
+
+    if action == "menu":
+        await state.clear()
+        await send_clean_from_call(
+            call,
+            state,
+            "Меню:",
+            reply_markup=kb_main_menu(user.role),
+        )
+        return
+
+    if action == "title":
+        await state.set_state(CreateOrder.waiting_title)
+        await send_clean_from_call(
+            call,
+            state,
+            "Введите название заказа:",
+            reply_markup=kb_nav_menu_help(back="order:back:menu"),
+        )
+        return
+
+    if action == "description":
+        await state.set_state(CreateOrder.waiting_description)
+        await send_clean_from_call(
+            call,
+            state,
+            "Опишите задачу и требования (можно ссылкой):",
+            reply_markup=kb_nav_menu_help(back="order:back:title"),
+        )
+        return
 
 @router.callback_query(F.data == "order:cancel")
 async def create_order_cancel(call: CallbackQuery, state: FSMContext):
@@ -108,7 +153,7 @@ async def create_order_title(message: Message, state: FSMContext):
             message,
             state,
             "Название не должно быть пустым. Введите название заказа:",
-            reply_markup=kb_nav(cancel="order:cancel"),
+            reply_markup=kb_nav_menu_help(back="order:back:menu"),
         )
         return
 
@@ -118,7 +163,7 @@ async def create_order_title(message: Message, state: FSMContext):
         message,
         state,
         "Опишите задачу и требования (можно ссылкой):",
-        reply_markup=kb_nav(cancel="order:cancel"),
+        reply_markup=kb_nav_menu_help(back="order:back:title"),
     )
 
 @router.message(CreateOrder.waiting_description)
@@ -139,7 +184,7 @@ async def create_order_description(message: Message, state: FSMContext):
             message,
             state,
             "Описание не должно быть пустым. Опишите задачу:",
-            reply_markup=kb_nav(cancel="order:cancel"),
+            reply_markup=kb_nav_menu_help(back="order:back:title"),
         )
         return
 
@@ -149,7 +194,7 @@ async def create_order_description(message: Message, state: FSMContext):
         message,
         state,
         "Укажите бюджет в долларах (число). Например: 50",
-        reply_markup=kb_nav(cancel="order:cancel"),
+        reply_markup=kb_nav_menu_help(back="order:back:description"),
     )
 
 @router.message(CreateOrder.waiting_budget)
@@ -170,7 +215,7 @@ async def create_order_budget(message: Message, state: FSMContext):
             message,
             state,
             "Бюджет должен быть числом. Например: 50",
-            reply_markup=kb_nav(cancel="order:cancel"),
+            reply_markup=kb_nav_menu_help(back="order:back:description"),
         )
         return
 
@@ -190,3 +235,65 @@ async def create_order_budget(message: Message, state: FSMContext):
         f"✅ Заказ создан. Номер: #{order_id}",
         reply_markup=kb_main_menu(user.role),
     )
+
+@router.callback_query(F.data == "client:my_orders")
+async def my_orders(call: CallbackQuery):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    if user.role != "client":
+        await call.answer("Раздел доступен только заказчику.", show_alert=True)
+        return
+
+    orders = await list_orders_for_client(user.id, limit=10)
+    if not orders:
+        await call.message.answer("У вас пока нет заказов.", reply_markup=kb_main_menu(user.role))
+        await call.answer()
+        return
+
+    text = "Ваши заказы:\n\nВыберите заказ для просмотра."
+    await call.message.answer(text, reply_markup=kb_orders_list(orders))
+    await call.answer()
+
+@router.callback_query(F.data.startswith("order:view:"))
+async def order_view(call: CallbackQuery):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    if user.role != "client":
+        await call.answer("Раздел доступен только заказчику.", show_alert=True)
+        return
+
+    try:
+        order_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer("Некорректный номер.", show_alert=True)
+        return
+
+    order = await get_order_for_client(order_id, user.id)
+    if not order:
+        await call.answer("Заказ не найден.", show_alert=True)
+        return
+
+    price = f"{int(order.get('budget_minor') or 0) / 100:.2f} {order.get('currency') or 'USD'}"
+    created_at = order.get("created_at")
+    created_label = created_at.strftime("%Y-%m-%d %H:%M") if created_at else "-"
+
+    title = order.get("title") or "-"
+    description = order.get("description") or "-"
+    if len(description) > 1500:
+        description = description[:1497] + "..."
+
+    text = (
+        f"Заказ #{order['id']}\n\n"
+        f"Название: {title}\n"
+        f"Описание: {description}\n"
+        f"Бюджет: {price}\n"
+        f"Статус: {order.get('status')}\n"
+        f"Создан: {created_label}"
+    )
+
+    await call.message.answer(text, reply_markup=kb_order_detail(order_id))
+    await call.answer()
