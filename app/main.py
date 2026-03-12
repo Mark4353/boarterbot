@@ -9,6 +9,7 @@ from app.handlers.menus import router as menus_router
 from app.handlers.registration import router as reg_router
 from app.handlers.profile import router as profile_router
 from app.handlers.orders import router as orders_router
+from app.handlers.verify import router as verify_router
 
 async def main():
     cfg = load_config()
@@ -18,6 +19,7 @@ async def main():
     await run_migration_file("migrations/002_profiles.sql")
     await run_migration_file("migrations/003_verification.sql")
     await run_migration_file("migrations/004_orders.sql")
+    await run_migration_file("migrations/005_orders_editor.sql")
 
     bot = Bot(token=cfg.bot_token, parse_mode=ParseMode.HTML)
     await bot.delete_webhook(drop_pending_updates=True)
@@ -27,6 +29,7 @@ async def main():
     dp.include_router(reg_router)
     dp.include_router(profile_router)
     dp.include_router(orders_router)
+    dp.include_router(verify_router)
     dp.include_router(menus_router)
     
     await dp.start_polling(bot)

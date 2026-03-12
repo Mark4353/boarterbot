@@ -3,9 +3,10 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
 from app.models import get_user_by_telegram_id
-from app.keyboards import kb_nav_menu_help, kb_main_menu, kb_orders_list, kb_order_detail
+from app.keyboards import kb_nav_menu_help, kb_main_menu, kb_orders_list, kb_order_detail, kb_editor_menu
 from app.states import CreateOrder
-from app.order_repo import create_order, list_orders_for_client, get_order_for_client
+from app.order_repo import create_order, list_orders_for_client, get_order_for_client, accept_order
+from app.profile_repo import get_editor_profile
 
 router = Router()
 
@@ -296,4 +297,33 @@ async def order_view(call: CallbackQuery):
     )
 
     await call.message.answer(text, reply_markup=kb_order_detail(order_id))
+    await call.answer()
+
+@router.callback_query(F.data.startswith("order:accept:"))
+async def order_accept(call: CallbackQuery):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    if user.role != "editor":
+        await call.answer("Доступно только монтажёрам.", show_alert=True)
+        return
+
+    p = await get_editor_profile(user.id)
+    if not p or p.get("verification_status") != "verified":
+        await call.answer("⛔ Сначала пройдите верификацию.", show_alert=True)
+        return
+
+    try:
+        order_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer("Некорректный номер.", show_alert=True)
+        return
+
+    ok = await accept_order(order_id, user.id)
+    if not ok:
+        await call.answer("Заказ уже недоступен.", show_alert=True)
+        return
+
+    await call.message.answer("✅ Заказ принят.", reply_markup=kb_editor_menu(True))
     await call.answer()

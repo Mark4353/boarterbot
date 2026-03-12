@@ -2,8 +2,11 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from app.models import get_user_by_telegram_id
-from app.keyboards import kb_main_menu, kb_editor_menu
+import os
+
+from app.keyboards import kb_main_menu, kb_editor_menu, kb_support, kb_editor_orders_list
 from app.profile_repo import get_editor_profile
+from app.order_repo import list_open_orders
 
 router = Router()
 
@@ -32,7 +35,14 @@ async def cb_menu(call: CallbackQuery):
     if call.data == "common:balance":
         await call.message.answer("💳 Баланс: скоро будет.")
     elif call.data == "common:support":
-        await call.message.answer("🆘 Поддержка: скоро будет.")
+        admin_username = os.getenv("ADMIN_USERNAME", "").strip()
+        if admin_username:
+            await call.message.answer(
+                "🆘 Поддержка: напишите админу.",
+                reply_markup=kb_support(admin_username),
+            )
+        else:
+            await call.message.answer("🆘 Поддержка: админ не настроен.")
     elif call.data == "mod:held_messages":
         await call.message.answer("🆕 Очередь модерации: скоро будет.")
     elif call.data == "editor:find_orders":
@@ -40,7 +50,14 @@ async def cb_menu(call: CallbackQuery):
         if not p or p.get("verification_status") != "verified":
             await call.answer("⛔ Сначала пройдите верификацию.", show_alert=True)
             return
-        await call.message.answer("🔎 Поиск заказов: скоро будет.")
+        orders = await list_open_orders(limit=10)
+        if not orders:
+            await call.message.answer("🔎 Доступных заказов пока нет.")
+        else:
+            await call.message.answer(
+                "🔎 Доступные заказы:",
+                reply_markup=kb_editor_orders_list(orders),
+            )
     else:
         await call.message.answer(f"⏳ Раздел в разработке: {call.data}")
 

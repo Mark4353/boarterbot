@@ -65,6 +65,7 @@ def kb_editor_menu(is_verified: bool) -> InlineKeyboardMarkup:
         b.button(text="🔎 Найти заказы", callback_data="editor:find_orders")
     else:
         b.button(text="✅ Пройти верификацию", callback_data="verify:start")
+        b.button(text="🧪 Авто-верификация (тест)", callback_data="verify:auto")
     b.button(text="📬 Мои отклики", callback_data="editor:my_proposals")
     b.button(text="💼 Мои сделки", callback_data="editor:my_deals")
     b.button(text="💳 Баланс", callback_data="common:balance")
@@ -142,4 +143,26 @@ def kb_order_detail(order_id: int) -> InlineKeyboardMarkup:
     b.button(text="🏠 Меню", callback_data="common:menu")
     b.button(text="🆘 Помощь", callback_data="common:support")
     b.adjust(1, 2)
+    return b.as_markup()
+
+def kb_support(admin_username: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    username = admin_username.lstrip("@")
+    b.button(text="✉️ Написать админу", url=f"https://t.me/{username}")
+    b.button(text="🏠 В меню", callback_data="common:menu")
+    b.adjust(1, 1)
+    return b.as_markup()
+
+def kb_editor_orders_list(orders: list[dict]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for o in orders:
+        title = (o.get("title") or "-").strip()
+        if len(title) > 24:
+            title = title[:21] + "..."
+        b.button(text=f"✅ Принять #{o['id']} {title}", callback_data=f"order:accept:{o['id']}")
+    b.button(text="🏠 Меню", callback_data="common:menu")
+    b.button(text="🆘 Поддержка", callback_data="common:support")
+    sizes = [1] * len(orders)
+    sizes.append(2)
+    b.adjust(*sizes)
     return b.as_markup()

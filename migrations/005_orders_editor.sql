@@ -1,0 +1,2 @@
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS editor_id BIGINT NULL REFERENCES users(id);
