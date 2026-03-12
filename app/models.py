@@ -43,3 +43,12 @@ async def get_user_by_telegram_id(telegram_id: int) -> Optional[User]:
             telegram_id
         )
     return User(**dict(row)) if row else None
+
+async def get_user_by_id(user_id: int) -> Optional[User]:
+    p = pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, telegram_id, username, display_name, role, language FROM users WHERE id=$1",
+            user_id
+        )
+    return User(**dict(row)) if row else None

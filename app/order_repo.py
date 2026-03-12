@@ -5,20 +5,22 @@ async def create_order(
     title: str,
     description: str,
     budget_minor: int,
+    deadline_at,
     currency: str = "USD",
 ) -> int:
     p = pool()
     async with p.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO orders (client_id, title, description, budget_minor, currency)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO orders (client_id, title, description, budget_minor, deadline_at, currency)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id
             """,
             client_id,
             title,
             description,
             budget_minor,
+            deadline_at,
             currency,
         )
     return int(row["id"])
@@ -28,7 +30,7 @@ async def list_orders_for_client(user_id: int, limit: int = 10) -> list[dict]:
     async with p.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, title, budget_minor, currency, status, created_at
+            SELECT id, title, budget_minor, currency, status, created_at, deadline_at
             FROM orders
             WHERE client_id = $1
             ORDER BY created_at DESC
@@ -44,7 +46,7 @@ async def get_order_for_client(order_id: int, user_id: int) -> dict | None:
     async with p.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, title, description, budget_minor, currency, status, created_at
+            SELECT id, title, description, budget_minor, currency, status, created_at, deadline_at
             FROM orders
             WHERE id = $1 AND client_id = $2
             """,
@@ -58,7 +60,7 @@ async def list_open_orders(limit: int = 10) -> list[dict]:
     async with p.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, title, budget_minor, currency, created_at
+            SELECT id, title, budget_minor, currency, created_at, deadline_at
             FROM orders
             WHERE status = 'open'
             ORDER BY created_at DESC
@@ -67,6 +69,19 @@ async def list_open_orders(limit: int = 10) -> list[dict]:
             limit,
         )
     return [dict(r) for r in rows]
+
+async def get_order_by_id(order_id: int) -> dict | None:
+    p = pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, client_id, editor_id, title, status, deadline_at
+            FROM orders
+            WHERE id = $1
+            """,
+            order_id,
+        )
+    return dict(row) if row else None
 
 async def accept_order(order_id: int, editor_id: int) -> bool:
     p = pool()

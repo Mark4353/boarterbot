@@ -20,6 +20,7 @@ async def main():
     await run_migration_file("migrations/003_verification.sql")
     await run_migration_file("migrations/004_orders.sql")
     await run_migration_file("migrations/005_orders_editor.sql")
+    await run_migration_file("migrations/006_orders_deadline.sql")
 
     bot = Bot(token=cfg.bot_token, parse_mode=ParseMode.HTML)
     await bot.delete_webhook(drop_pending_updates=True)

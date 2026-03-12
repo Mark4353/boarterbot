@@ -25,3 +25,7 @@ class CreateOrder(StatesGroup):
     waiting_title = State()
     waiting_description = State()
     waiting_budget = State()
+    waiting_deadline = State()
+
+class DealChange(StatesGroup):
+    waiting_text = State()

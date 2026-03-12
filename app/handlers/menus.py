@@ -1,9 +1,8 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
-
-from app.models import get_user_by_telegram_id
 import os
 
+from app.models import get_user_by_telegram_id
 from app.keyboards import kb_main_menu, kb_editor_menu, kb_support, kb_editor_orders_list
 from app.profile_repo import get_editor_profile
 from app.order_repo import list_open_orders
@@ -11,7 +10,7 @@ from app.order_repo import list_open_orders
 router = Router()
 
 @router.callback_query(
-    F.data.startswith(("client:", "editor:", "mod:", "common:")) &
+    F.data.startswith(("client:", "editor:", "mod:", "common:", "deal:")) &
     ~F.data.in_(["client:profile", "editor:profile", "client:create_order", "client:my_orders"])
 )
 async def cb_menu(call: CallbackQuery):
@@ -58,6 +57,12 @@ async def cb_menu(call: CallbackQuery):
                 "🔎 Доступные заказы:",
                 reply_markup=kb_editor_orders_list(orders),
             )
+    elif call.data.startswith("deal:chat"):
+        await call.message.answer("💬 Чат: скоро будет.")
+    elif call.data.startswith("deal:change"):
+        await call.message.answer("✏️ Изменить: скоро будет.")
+    elif call.data.startswith("deal:dispute"):
+        await call.message.answer("⚠️ Спор: скоро будет.")
     else:
         await call.message.answer(f"⏳ Раздел в разработке: {call.data}")
 

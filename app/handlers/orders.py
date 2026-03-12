@@ -1,11 +1,12 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
+from datetime import datetime
 
-from app.models import get_user_by_telegram_id
-from app.keyboards import kb_nav_menu_help, kb_main_menu, kb_orders_list, kb_order_detail, kb_editor_menu
-from app.states import CreateOrder
-from app.order_repo import create_order, list_orders_for_client, get_order_for_client, accept_order
+from app.models import get_user_by_telegram_id, get_user_by_id
+from app.keyboards import kb_nav_menu_help, kb_main_menu, kb_orders_list, kb_order_detail, kb_editor_menu, kb_deal_menu
+from app.states import CreateOrder, DealChange
+from app.order_repo import create_order, list_orders_for_client, get_order_for_client, accept_order, get_order_by_id
 from app.profile_repo import get_editor_profile
 
 router = Router()
@@ -120,6 +121,16 @@ async def create_order_back(call: CallbackQuery, state: FSMContext):
         )
         return
 
+    if action == "budget":
+        await state.set_state(CreateOrder.waiting_budget)
+        await send_clean_from_call(
+            call,
+            state,
+            "Укажите бюджет в долларах (число). Например: 50",
+            reply_markup=kb_nav_menu_help(back="order:back:description"),
+        )
+        return
+
 @router.callback_query(F.data == "order:cancel")
 async def create_order_cancel(call: CallbackQuery, state: FSMContext):
     user = await get_user_by_telegram_id(call.from_user.id)
@@ -220,12 +231,46 @@ async def create_order_budget(message: Message, state: FSMContext):
         )
         return
 
+    await state.update_data(budget_minor=int(raw) * 100)
+    await state.set_state(CreateOrder.waiting_deadline)
+    await send_clean(
+        message,
+        state,
+        "Укажите дедлайн (гггг-мм-дд чч:мм). Например: 2026-03-15 18:30",
+        reply_markup=kb_nav_menu_help(back="order:back:budget"),
+    )
+
+@router.message(CreateOrder.waiting_deadline)
+async def create_order_deadline(message: Message, state: FSMContext):
+    user = await get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+    if user.role != "client":
+        await state.clear()
+        await message.answer("Создание заказа доступно только заказчику.")
+        return
+
+    raw = (message.text or "").strip()
+    await safe_delete_message(message)
+
+    try:
+        deadline_at = datetime.strptime(raw, "%Y-%m-%d %H:%M")
+    except ValueError:
+        await send_clean(
+            message,
+            state,
+            "Дедлайн должен быть в формате гггг-мм-дд чч:мм. Например: 2026-03-15 18:30",
+            reply_markup=kb_nav_menu_help(back="order:back:budget"),
+        )
+        return
+
     data = await state.get_data()
     order_id = await create_order(
         client_id=user.id,
         title=data.get("title", ""),
         description=data.get("description", ""),
-        budget_minor=int(raw) * 100,
+        budget_minor=int(data.get("budget_minor") or 0),
+        deadline_at=deadline_at,
         currency="USD",
     )
 
@@ -281,6 +326,8 @@ async def order_view(call: CallbackQuery):
     price = f"{int(order.get('budget_minor') or 0) / 100:.2f} {order.get('currency') or 'USD'}"
     created_at = order.get("created_at")
     created_label = created_at.strftime("%Y-%m-%d %H:%M") if created_at else "-"
+    deadline_at = order.get("deadline_at")
+    deadline_label = deadline_at.strftime("%Y-%m-%d %H:%M") if deadline_at else "-"
 
     title = order.get("title") or "-"
     description = order.get("description") or "-"
@@ -293,7 +340,8 @@ async def order_view(call: CallbackQuery):
         f"Описание: {description}\n"
         f"Бюджет: {price}\n"
         f"Статус: {order.get('status')}\n"
-        f"Создан: {created_label}"
+        f"Создан: {created_label}\n"
+        f"Дедлайн: {deadline_label}"
     )
 
     await call.message.answer(text, reply_markup=kb_order_detail(order_id))
@@ -325,5 +373,65 @@ async def order_accept(call: CallbackQuery):
         await call.answer("Заказ уже недоступен.", show_alert=True)
         return
 
-    await call.message.answer("✅ Заказ принят.", reply_markup=kb_editor_menu(True))
+    await call.message.answer("✅ Заказ принят.", reply_markup=kb_deal_menu(order_id))
     await call.answer()
+
+@router.callback_query(F.data.startswith("deal:change:"))
+async def deal_change_start(call: CallbackQuery, state: FSMContext):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    if user.role != "editor":
+        await call.answer("Доступно только монтажёрам.", show_alert=True)
+        return
+
+    try:
+        order_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer("Некорректный номер.", show_alert=True)
+        return
+
+    order = await get_order_by_id(order_id)
+    if not order or order.get("editor_id") != user.id:
+        await call.answer("Заказ не найден.", show_alert=True)
+        return
+
+    await state.clear()
+    await state.set_state(DealChange.waiting_text)
+    await state.update_data(order_id=order_id)
+    await call.answer()
+    await call.message.answer("Опишите что нужно изменить:")
+
+@router.message(DealChange.waiting_text)
+async def deal_change_submit(message: Message, state: FSMContext):
+    user = await get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+    if user.role != "editor":
+        await state.clear()
+        await message.answer("Доступно только монтажёрам.")
+        return
+
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Опишите что нужно изменить.")
+        return
+
+    data = await state.get_data()
+    order_id = int(data.get("order_id") or 0)
+    order = await get_order_by_id(order_id)
+    if not order or order.get("editor_id") != user.id:
+        await state.clear()
+        await message.answer("Заказ не найден.")
+        return
+
+    client = await get_user_by_id(int(order["client_id"]))
+    if client:
+        await message.bot.send_message(
+            client.telegram_id,
+            f"Запрос на изменение по заказу #{order_id}:\n{text}",
+        )
+
+    await state.clear()
+    await message.answer("Отправлено заказчику.")

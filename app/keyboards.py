@@ -166,3 +166,12 @@ def kb_editor_orders_list(orders: list[dict]) -> InlineKeyboardMarkup:
     sizes.append(2)
     b.adjust(*sizes)
     return b.as_markup()
+
+def kb_deal_menu(order_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="💬 Чат", callback_data=f"deal:chat:{order_id}")
+    b.button(text="✏️ Изменить", callback_data=f"deal:change:{order_id}")
+    b.button(text="⚠️ Спор", callback_data=f"deal:dispute:{order_id}")
+    b.button(text="🆘 Помощь", callback_data="common:support")
+    b.adjust(2, 2)
+    return b.as_markup()
