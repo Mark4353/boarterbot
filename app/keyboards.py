@@ -16,20 +16,6 @@ def kb_nav(back: str | None = None, cancel: str = "reg:cancel") -> InlineKeyboar
     b.adjust(2)
     return b.as_markup()
 
-def kb_profile_editor() -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.button(text="✏️ Сменить информацию", callback_data="reg:edit_editor")
-    b.button(text="⬅️ В меню", callback_data="common:menu")
-    b.adjust(1)
-    return b.as_markup()
-
-def kb_profile_client() -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.button(text="✏️ Сменить информацию", callback_data="reg:edit_client")
-    b.button(text="⬅️ В меню", callback_data="common:menu")
-    b.adjust(1)
-    return b.as_markup()
-
 def kb_main_menu(role: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
 
@@ -44,7 +30,7 @@ def kb_main_menu(role: str) -> InlineKeyboardMarkup:
 
     elif role == "editor":
         b.button(text="👤 Профиль", callback_data="editor:profile")
-        b.button(text="🔎 Найти заказы", callback_data="editor:find_orders")
+        b.button(text="✅ Пройти верификацию", callback_data="verify:start")
         b.button(text="📬 Мои отклики", callback_data="editor:my_proposals")
         b.button(text="💼 Мои сделки", callback_data="editor:my_deals")
         b.button(text="💳 Баланс", callback_data="common:balance")
@@ -58,16 +44,30 @@ def kb_main_menu(role: str) -> InlineKeyboardMarkup:
         b.adjust(1)
 
     return b.as_markup()
+
+def kb_editor_menu(is_verified: bool) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="👤 Профиль", callback_data="editor:profile")
+    if is_verified:
+        b.button(text="🔎 Найти заказы", callback_data="editor:find_orders")
+    else:
+        b.button(text="✅ Пройти верификацию", callback_data="verify:start")
+    b.button(text="📬 Мои отклики", callback_data="editor:my_proposals")
+    b.button(text="💼 Мои сделки", callback_data="editor:my_deals")
+    b.button(text="💳 Баланс", callback_data="common:balance")
+    b.button(text="🆘 Поддержка", callback_data="common:support")
+    b.adjust(2, 2, 2)
+    return b.as_markup()
+
 def kb_profile(role: str, verification_status: str | None = None) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
 
     if role == "editor":
-        b.button(text="✏️ Изменить информацию", callback_data="reg:edit_editor")
+        b.button(text="✏️ Изменить информацию", callback_data="edit:editor_menu")
         if verification_status != "verified":
             b.button(text="✅ Пройти верификацию", callback_data="verify:start")
-
     elif role == "client":
-        b.button(text="✏️ Изменить информацию", callback_data="reg:edit_client")
+        b.button(text="✏️ Изменить информацию", callback_data="edit:client_menu")
 
     b.button(text="🔁 Сменить роль", callback_data="profile:change_role")
     b.button(text="⬅️ В меню", callback_data="common:menu")
@@ -81,18 +81,30 @@ def kb_change_role_confirm() -> InlineKeyboardMarkup:
     b.button(text="⬅️ Назад", callback_data="profile:back")
     b.adjust(2, 1)
     return b.as_markup()
-def kb_editor_menu(is_verified: bool) -> InlineKeyboardMarkup:
+
+def kb_verify_admin(editor_user_id: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="👤 Профиль", callback_data="editor:profile")
+    b.button(text="✅ Approve", callback_data=f"verify:approve:{editor_user_id}")
+    b.button(text="❌ Reject", callback_data=f"verify:reject:{editor_user_id}")
+    b.button(text="✉️ Написать", callback_data=f"verify:msg:{editor_user_id}")
+    b.adjust(2, 1)
+    return b.as_markup()
 
-    if is_verified:
-        b.button(text="🔎 Найти заказы", callback_data="editor:find_orders")
-    else:
-        b.button(text="✅ Пройти верификацию", callback_data="verify:start")
+def kb_edit_editor_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="👤 Изменить имя", callback_data="edit:editor:name")
+    b.button(text="🎬 Изменить специализации", callback_data="edit:editor:skills")
+    b.button(text="💰 Изменить цену", callback_data="edit:editor:price")
+    b.button(text="📁 Изменить портфолио", callback_data="edit:editor:portfolio")
+    b.button(text="⬅️ В профиль", callback_data="editor:profile")
+    b.button(text="🏠 В меню", callback_data="common:menu")
+    b.adjust(1)
+    return b.as_markup()
 
-    b.button(text="📬 Мои отклики", callback_data="editor:my_proposals")
-    b.button(text="💼 Мои сделки", callback_data="editor:my_deals")
-    b.button(text="💳 Баланс", callback_data="common:balance")
-    b.button(text="🆘 Поддержка", callback_data="common:support")
-    b.adjust(2, 2, 2)
+def kb_edit_client_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="👤 Изменить имя", callback_data="edit:client:name")
+    b.button(text="⬅️ В профиль", callback_data="client:profile")
+    b.button(text="🏠 В меню", callback_data="common:menu")
+    b.adjust(1)
     return b.as_markup()
