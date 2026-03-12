@@ -8,6 +8,14 @@ def kb_choose_role() -> InlineKeyboardMarkup:
     b.adjust(2)
     return b.as_markup()
 
+def kb_nav(back: str | None = None, cancel: str = "reg:cancel") -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    if back:
+        b.button(text="⬅️ Назад", callback_data=back)
+    b.button(text="❌ Отмена", callback_data=cancel)
+    b.adjust(2)
+    return b.as_markup()
+
 def kb_nav_menu_help(
     back: str | None = None,
     menu: str = "common:menu",
@@ -15,40 +23,10 @@ def kb_nav_menu_help(
 ) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     if back:
-        b.button(text="â¬…ï¸ ÐÐ°Ð·Ð°Ð´", callback_data=back)
-    b.button(text="ðŸ  ÐœÐµÐ½ÑŽ", callback_data=menu)
-    b.button(text="ðŸ†˜ ÐŸÐ¾Ð¼Ð¾Ñ‰ÑŒ", callback_data=help_)
-    b.adjust(3)
-    return b.as_markup()
-
-def kb_orders_list(orders: list[dict]) -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    for o in orders:
-        title = (o.get("title") or "—").strip()
-        if len(title) > 24:
-            title = title[:21] + "..."
-        b.button(text=f"#{o['id']} {title}", callback_data=f"order:view:{o['id']}")
-    b.button(text="🏠 Меню", callback_data="common:menu")
-    b.button(text="🆘 Помощь", callback_data="common:support")
-    sizes = [1] * len(orders)
-    sizes.append(2)
-    b.adjust(*sizes)
-    return b.as_markup()
-
-def kb_order_detail(order_id: int) -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.button(text="⬅️ К списку", callback_data="client:my_orders")
-    b.button(text="🏠 Меню", callback_data="common:menu")
-    b.button(text="🆘 Помощь", callback_data="common:support")
-    b.adjust(1, 2)
-    return b.as_markup()
-
-def kb_nav(back: str | None = None, cancel: str = "reg:cancel") -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    if back:
         b.button(text="⬅️ Назад", callback_data=back)
-    b.button(text="❌ Отмена", callback_data=cancel)
-    b.adjust(2)
+    b.button(text="🏠 Меню", callback_data=menu)
+    b.button(text="🆘 Помощь", callback_data=help_)
+    b.adjust(3)
     return b.as_markup()
 
 def kb_main_menu(role: str) -> InlineKeyboardMarkup:
@@ -142,4 +120,26 @@ def kb_edit_client_menu() -> InlineKeyboardMarkup:
     b.button(text="⬅️ В профиль", callback_data="client:profile")
     b.button(text="🏠 В меню", callback_data="common:menu")
     b.adjust(1)
+    return b.as_markup()
+
+def kb_orders_list(orders: list[dict]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for o in orders:
+        title = (o.get("title") or "-").strip()
+        if len(title) > 24:
+            title = title[:21] + "..."
+        b.button(text=f"#{o['id']} {title}", callback_data=f"order:view:{o['id']}")
+    b.button(text="🏠 Меню", callback_data="common:menu")
+    b.button(text="🆘 Помощь", callback_data="common:support")
+    sizes = [1] * len(orders)
+    sizes.append(2)
+    b.adjust(*sizes)
+    return b.as_markup()
+
+def kb_order_detail(order_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ К списку", callback_data="client:my_orders")
+    b.button(text="🏠 Меню", callback_data="common:menu")
+    b.button(text="🆘 Помощь", callback_data="common:support")
+    b.adjust(1, 2)
     return b.as_markup()
