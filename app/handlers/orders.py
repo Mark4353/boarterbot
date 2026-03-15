@@ -367,6 +367,270 @@ async def order_view(call: CallbackQuery):
 
     price = f"{int(order.get('budget_minor') or 0) / 100:.2f} {order.get('currency') or 'USD'}"
     revision_price = f"{int(order.get('revision_price_minor') or 0) / 100:.2f} {order.get('currency') or 'USD'}"
+    created_at = order.get("created_at")
+    created_label = created_at.strftime("%Y-%m-%d %H:%M") if created_at else "-"
+    deadline_at = order.get("deadline_at")
+    deadline_label = deadline_at.strftime("%Y-%m-%d %H:%M") if deadline_at else "-"
+
+    title = order.get("title") or "-"
+    description = order.get("description") or "-"
+    if len(description) > 1500:
+        description = description[:1497] + "..."
+
+    allow_edit = order.get("status") == "open" and not order.get("editor_id")
+    text = (
+        f"Заказ #{order['id']}\n\n"
+        f"Название: {title}\n"
+        f"Описание: {description}\n"
+        f"Бюджет: {price}\n"
+        f"Цена за правки: {revision_price}\n"
+        f"Статус: {order.get('status')}\n"
+        f"Создан: {created_label}\n"
+        f"Дедлайн: {deadline_label}"
+    )
+
+    await call.message.answer(text, reply_markup=kb_order_detail(order_id, allow_edit=allow_edit))
+    await call.answer()
+
+@router.callback_query(F.data == "order_edit:cancel")
+async def order_edit_cancel(call: CallbackQuery, state: FSMContext):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    await state.clear()
+    await call.answer()
+    await send_clean_from_call(
+        call,
+        state,
+        "Меню:",
+        reply_markup=kb_main_menu(user.role),
+    )
+
+@router.callback_query(F.data.startswith("order:edit:"))
+async def order_edit_start(call: CallbackQuery, state: FSMContext):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    if user.role != "client":
+        await call.answer("Раздел доступен только заказчику.", show_alert=True)
+        return
+
+    try:
+        order_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer("Некорректный номер.", show_alert=True)
+        return
+
+    order = await get_order_for_client(order_id, user.id)
+    if not order or order.get('status') != 'open' or order.get('editor_id'):
+        await call.answer("Заказ нельзя редактировать.", show_alert=True)
+        return
+
+    await state.clear()
+    await state.set_state(EditOrder.waiting_title)
+    await state.update_data(order_id=order_id)
+    await call.answer()
+    await send_clean_from_call(
+        call,
+        state,
+        f"Введите новое название заказа (текущее: {order.get('title') or '-'}):",
+        reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+    )
+
+@router.message(EditOrder.waiting_title)
+async def order_edit_title(message: Message, state: FSMContext):
+    user = await get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+    if user.role != "client":
+        await state.clear()
+        await message.answer("Создание заказа доступно только заказчику.")
+        return
+
+    title = (message.text or "").strip()
+    await safe_delete_message(message)
+    if not title:
+        await send_clean(
+            message,
+            state,
+            "Название не должно быть пустым.",
+            reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+        )
+        return
+
+    await state.update_data(title=title)
+    await state.set_state(EditOrder.waiting_description)
+    await send_clean(
+        message,
+        state,
+        "Опишите задачу и требования (можно ссылкой):",
+        reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+    )
+
+@router.message(EditOrder.waiting_description)
+async def order_edit_description(message: Message, state: FSMContext):
+    user = await get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+    if user.role != "client":
+        await state.clear()
+        await message.answer("Создание заказа доступно только заказчику.")
+        return
+
+    description = (message.text or "").strip()
+    await safe_delete_message(message)
+    if not description:
+        await send_clean(
+            message,
+            state,
+            "Описание не должно быть пустым.",
+            reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+        )
+        return
+
+    await state.update_data(description=description)
+    await state.set_state(EditOrder.waiting_budget)
+    await send_clean(
+        message,
+        state,
+        "Укажите бюджет в долларах (число). Например: 50",
+        reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+    )
+
+@router.message(EditOrder.waiting_budget)
+async def order_edit_budget(message: Message, state: FSMContext):
+    user = await get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+    if user.role != "client":
+        await state.clear()
+        await message.answer("Создание заказа доступно только заказчику.")
+        return
+
+    raw = (message.text or "").strip()
+    await safe_delete_message(message)
+    if not raw.isdigit():
+        await send_clean(
+            message,
+            state,
+            "Бюджет должен быть числом. Например: 50",
+            reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+        )
+        return
+
+    await state.update_data(budget_minor=int(raw) * 100)
+    await state.set_state(EditOrder.waiting_revision_price)
+    await send_clean(
+        message,
+        state,
+        "Укажите цену за правки (в долларах, число). Например: 10",
+        reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+    )
+
+@router.message(EditOrder.waiting_revision_price)
+async def order_edit_revision_price(message: Message, state: FSMContext):
+    user = await get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+    if user.role != "client":
+        await state.clear()
+        await message.answer("Создание заказа доступно только заказчику.")
+        return
+
+    raw = (message.text or "").strip()
+    await safe_delete_message(message)
+    if not raw.isdigit():
+        await send_clean(
+            message,
+            state,
+            "Цена за правки должна быть числом. Например: 10",
+            reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+        )
+        return
+
+    await state.update_data(revision_price_minor=int(raw) * 100)
+    await state.set_state(EditOrder.waiting_deadline)
+    await send_clean(
+        message,
+        state,
+        "Укажите дедлайн (гггг-мм-дд чч:мм). Например: 2026-03-15 18:30",
+        reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+    )
+
+@router.message(EditOrder.waiting_deadline)
+async def order_edit_deadline(message: Message, state: FSMContext):
+    user = await get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        return
+    if user.role != "client":
+        await state.clear()
+        await message.answer("Создание заказа доступно только заказчику.")
+        return
+
+    raw = (message.text or "").strip()
+    await safe_delete_message(message)
+
+    try:
+        deadline_at = datetime.strptime(raw, "%Y-%m-%d %H:%M")
+    except ValueError:
+        await send_clean(
+            message,
+            state,
+            "Дедлайн должен быть в формате гггг-мм-дд чч:мм. Например: 2026-03-15 18:30",
+            reply_markup=kb_nav_menu_help(back="order_edit:cancel"),
+        )
+        return
+
+    data = await state.get_data()
+    order_id = int(data.get('order_id') or 0)
+    ok = await update_order_if_open(
+        order_id=order_id,
+        client_id=user.id,
+        title=data.get('title', ''),
+        description=data.get('description', ''),
+        budget_minor=int(data.get('budget_minor') or 0),
+        revision_price_minor=int(data.get('revision_price_minor') or 0),
+        deadline_at=deadline_at,
+    )
+
+    await state.clear()
+
+    if not ok:
+        await message.answer("Заказ нельзя редактировать. Возможно, на него уже откликнулись.")
+        return
+
+    await message.answer("✅ Заказ обновлен.", reply_markup=kb_main_menu(user.role))
+
+@router.callback_query(F.data.startswith("order:details:"))
+async def order_details_for_editor(call: CallbackQuery):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer("Нажмите /start", show_alert=True)
+        return
+    if user.role != "editor":
+        await call.answer("Доступно только монтажёрам.", show_alert=True)
+        return
+
+    p = await get_editor_profile(user.id)
+    if not p or p.get("verification_status") != "verified":
+        await call.answer("⛔ Сначала пройдите верификацию.", show_alert=True)
+        return
+
+    try:
+        order_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer("Некорректный номер.", show_alert=True)
+        return
+
+    order = await get_order_by_id(order_id)
+    if not order or order.get('status') != 'open' or order.get('editor_id'):
+        await call.answer("Заказ недоступен.", show_alert=True)
+        return
+
+    price = f"{int(order.get('budget_minor') or 0) / 100:.2f} {order.get('currency') or 'USD'}"
+    revision_price = f"{int(order.get('revision_price_minor') or 0) / 100:.2f} {order.get('currency') or 'USD'}"
     created_at = order.get('created_at')
     created_label = created_at.strftime("%Y-%m-%d %H:%M") if created_at else "-"
     deadline_at = order.get('deadline_at')
@@ -378,24 +642,18 @@ async def order_view(call: CallbackQuery):
         description = description[:1497] + '...'
 
     text = (
-        f"Заказ #{order['id']}
-
-"
-        f"Название: {title}
-"
-        f"Описание: {description}
-"
-        f"Бюджет: {price}
-"
-        f"Цена за правки: {revision_price}
-"
-        f"Создан: {created_label}
-"
+        f"Заказ #{order['id']}\n\n"
+        f"Название: {title}\n"
+        f"Описание: {description}\n"
+        f"Бюджет: {price}\n"
+        f"Цена за правки: {revision_price}\n"
+        f"Создан: {created_label}\n"
         f"Дедлайн: {deadline_label}"
     )
 
     await call.message.answer(text, reply_markup=kb_editor_order_detail(order_id))
     await call.answer()
+
 
 @router.callback_query(F.data.startswith("order:chat:"))
 async def order_chat_request(call: CallbackQuery):
@@ -405,6 +663,11 @@ async def order_chat_request(call: CallbackQuery):
         return
     if user.role != "editor":
         await call.answer("Доступно только монтажёрам.", show_alert=True)
+        return
+
+    p = await get_editor_profile(user.id)
+    if not p or p.get("verification_status") != "verified":
+        await call.answer("⛔ Сначала пройдите верификацию.", show_alert=True)
         return
 
     try:
@@ -437,6 +700,11 @@ async def order_proposal_start(call: CallbackQuery, state: FSMContext):
         return
     if user.role != "editor":
         await call.answer("Доступно только монтажёрам.", show_alert=True)
+        return
+
+    p = await get_editor_profile(user.id)
+    if not p or p.get("verification_status") != "verified":
+        await call.answer("⛔ Сначала пройдите верификацию.", show_alert=True)
         return
 
     try:
