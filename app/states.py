@@ -80,3 +80,6 @@ class ModerationUserLookup(StatesGroup):
 
 class ModerationMessage(StatesGroup):
     waiting_text = State()
+
+class ModerationRefund(StatesGroup):
+    waiting_amount = State()

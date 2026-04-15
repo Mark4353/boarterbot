@@ -2,6 +2,7 @@ import aiohttp
 import json
 import base64
 import hashlib
+import hmac
 from urllib.parse import quote_plus
 from typing import Optional, Tuple, Dict, Any
 from app.config import load_config
@@ -30,9 +31,28 @@ class PaymentAPI:
         digest = hashlib.sha1(payload.encode("utf-8")).digest()
         return base64.b64encode(digest).decode("utf-8")
 
+    def _signature_sha3(self, data: str) -> str:
+        payload = (self.private_key + data + self.private_key).encode("utf-8")
+        digest = hashlib.sha3_256(payload).digest()
+        return base64.b64encode(digest).decode("utf-8")
+
+    def verify_callback_signature(self, data: str, signature: str) -> bool:
+        if not data or not signature:
+            return False
+        sig_sha1 = self._signature(data)
+        sig_sha3 = self._signature_sha3(data)
+        return hmac.compare_digest(signature, sig_sha1) or hmac.compare_digest(signature, sig_sha3)
+
+    def decode_callback_data(self, data: str) -> Optional[Dict[str, Any]]:
+        try:
+            raw = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+            return json.loads(raw)
+        except Exception:
+            return None
+
     async def create_payment_link(
         self,
-        order_id: int,
+        order_id: int | str,
         amount_minor: int,
         currency: str,
         customer_email: Optional[str],
@@ -142,6 +162,41 @@ class PaymentAPI:
             print(f"Error getting LiqPay payment details {payment_id}: {e}")
             return None
 
+    async def refund_payment(
+        self,
+        order_id: str,
+        amount_minor: Optional[int] = None,
+        currency: str = "USD",
+    ) -> Optional[Dict[str, Any]]:
+        """Refund a LiqPay payment (full or partial)."""
+        payload = {
+            "version": "3",
+            "public_key": self.public_key,
+            "action": "refund",
+            "order_id": order_id,
+            "currency": currency.upper(),
+            "sandbox": 1 if self.sandbox else 0,
+        }
+        if amount_minor is not None:
+            amount = amount_minor / 100
+            payload["amount"] = f"{amount:.2f}"
+
+        try:
+            data = self._encode_payload(payload)
+            signature = self._signature(data)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.api_url,
+                    data={"data": data, "signature": signature},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    if response.status != 200:
+                        return None
+                    return await response.json()
+        except Exception as e:
+            print(f"Error refunding LiqPay payment {order_id}: {e}")
+            return None
+
 
 # Global instance
 _payment_api = None
@@ -155,7 +210,7 @@ def get_payment_api() -> PaymentAPI:
 
 # Convenience functions
 async def create_payment_link(
-    order_id: int,
+    order_id: int | str,
     amount_minor: int,
     currency: str,
     customer_email: str | None,
@@ -170,6 +225,10 @@ async def create_payment_link(
         customer_email=customer_email,
         order_title=order_title,
     )
+
+async def refund_payment(order_id: str, amount_minor: int | None = None, currency: str = "USD") -> Optional[Dict[str, Any]]:
+    api = get_payment_api()
+    return await api.refund_payment(order_id=order_id, amount_minor=amount_minor, currency=currency)
 
 async def verify_payment(payment_id: str) -> bool:
     """Verify payment status"""

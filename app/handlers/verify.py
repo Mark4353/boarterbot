@@ -5,8 +5,9 @@ from aiogram.fsm.context import FSMContext
 from app.models import get_user_by_telegram_id, get_user_by_id
 from app.moderation_utils import get_moderator_ids
 from app.states import Verify, VerifyChat
-from app.profile_repo import get_editor_profile, set_editor_test_submission
-from app.keyboards import kb_nav_menu_help, kb_editor_menu, kb_verify_chat_reply, kb_verify_chat_controls
+from app.profile_repo import get_editor_profile, set_editor_test_submission, set_editor_verification
+from app.keyboards import kb_nav_menu_help, kb_editor_menu, kb_verify_chat_reply, kb_verify_chat_controls, kb_verify_admin
+from app.moderation_utils import is_moderator_telegram_id
 from app import texts
 
 router = Router()
@@ -69,7 +70,11 @@ async def verify_submit(message: Message, state: FSMContext):
     if mods:
         for mod_id in mods:
             try:
-                await message.bot.send_message(mod_id, text)
+                await message.bot.send_message(
+                    mod_id,
+                    text,
+                    reply_markup=kb_verify_admin(user.id, None),
+                )
             except:
                 pass
         await message.answer(texts.tr(user.language, "Request sent to moderators.", "Заявку відправлено модераторам."), reply_markup=kb_editor_menu(False, user.language))
@@ -111,6 +116,83 @@ async def verify_chat_exit(call: CallbackQuery, state: FSMContext):
         await call.message.answer(texts.tr(user.language, "Chat closed.", "Чат закрито."), reply_markup=kb_editor_menu(is_verified, user.language))
     else:
         await call.message.answer(texts.tr(user.language, "Chat closed.", "Чат закрито."))
+
+@router.callback_query(F.data.startswith("verify:approve:"))
+async def verify_approve(call: CallbackQuery):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer(texts.tr(None, "Type /start", "Натисніть /start"), show_alert=True)
+        return
+    if not is_moderator_telegram_id(call.from_user.id):
+        await call.answer(texts.tr(user.language, "Access denied.", "Немає доступу."), show_alert=True)
+        return
+
+    try:
+        editor_user_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer(texts.tr(user.language, "Invalid data.", "Невірні дані."), show_alert=True)
+        return
+
+    await set_editor_verification(editor_user_id, "verified", note="approved by moderator")
+    editor = await get_user_by_id(editor_user_id)
+    if editor:
+        await call.bot.send_message(
+            editor.telegram_id,
+            texts.tr(editor.language, "✅ Your verification is approved.", "✅ Вашу верифікацію підтверджено."),
+            reply_markup=kb_editor_menu(True, editor.language),
+        )
+    await call.answer(texts.tr(user.language, "✅ Approved.", "✅ Підтверджено."))
+
+@router.callback_query(F.data.startswith("verify:reject:"))
+async def verify_reject(call: CallbackQuery):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer(texts.tr(None, "Type /start", "Натисніть /start"), show_alert=True)
+        return
+    if not is_moderator_telegram_id(call.from_user.id):
+        await call.answer(texts.tr(user.language, "Access denied.", "Немає доступу."), show_alert=True)
+        return
+
+    try:
+        editor_user_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer(texts.tr(user.language, "Invalid data.", "Невірні дані."), show_alert=True)
+        return
+
+    await set_editor_verification(editor_user_id, "rejected", note="rejected by moderator")
+    editor = await get_user_by_id(editor_user_id)
+    if editor:
+        await call.bot.send_message(
+            editor.telegram_id,
+            texts.tr(editor.language, "❌ Your verification was rejected.", "❌ Вашу верифікацію відхилено."),
+            reply_markup=kb_editor_menu(False, editor.language),
+        )
+    await call.answer(texts.tr(user.language, "❌ Rejected.", "❌ Відхилено."))
+
+@router.callback_query(F.data.startswith("verify:msg:"))
+async def verify_message(call: CallbackQuery, state: FSMContext):
+    user = await get_user_by_telegram_id(call.from_user.id)
+    if not user:
+        await call.answer(texts.tr(None, "Type /start", "Натисніть /start"), show_alert=True)
+        return
+    if not is_moderator_telegram_id(call.from_user.id):
+        await call.answer(texts.tr(user.language, "Access denied.", "Немає доступу."), show_alert=True)
+        return
+
+    try:
+        editor_user_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer(texts.tr(user.language, "Invalid data.", "Невірні дані."), show_alert=True)
+        return
+
+    await state.clear()
+    await state.set_state(VerifyChat.chatting)
+    await state.update_data(peer_user_id=editor_user_id)
+    await call.answer()
+    await call.message.answer(
+        texts.tr(user.language, "Chat with editor. Send a message.", "Чат з монтажером. Надсилайте повідомлення."),
+        reply_markup=kb_verify_chat_controls(user.language),
+    )
 
 @router.message(VerifyChat.chatting)
 async def verify_chat_message(message: Message, state: FSMContext):

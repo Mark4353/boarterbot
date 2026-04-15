@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from datetime import datetime, timedelta
+import time
 import re
 from urllib.parse import urlparse
 
@@ -1187,8 +1188,9 @@ async def revision_accept(call: CallbackQuery):
 
     # Create payment link for revision
     revision_price = order.get("revision_price_minor", 0)
+    payment_order_id = f"{order_id}-rev-{int(time.time())}"
     payment_link, payment_id = await create_payment_link(
-        order_id=order_id,
+        order_id=payment_order_id,
         amount_minor=revision_price,
         currency=(order.get("currency") or "USD").lower(),
         customer_email=None,
@@ -1273,8 +1275,9 @@ async def revision_counter_price(message: Message, state: FSMContext):
         return
 
     # Create payment link for revision
+    payment_order_id = f"{order_id}-rev-{int(time.time())}"
     payment_link, payment_id = await create_payment_link(
-        order_id=order_id,
+        order_id=payment_order_id,
         amount_minor=counter_price_minor,
         currency="usd",
         customer_email=None,

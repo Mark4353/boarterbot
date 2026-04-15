@@ -129,7 +129,7 @@ async def get_order_by_id(order_id: int) -> dict | None:
             """
             SELECT id, client_id, editor_id, title, description, budget_minor, revision_price_minor, currency, status,
                    created_at, deadline_at, dispute_opened_at, dispute_opened_by, dispute_client_agree, dispute_editor_agree,
-                   agreed_price_minor, payment_status, payment_link, paid_at
+                   agreed_price_minor, payment_status, payment_link, paid_at, stripe_session_id, revision_stripe_session_id
             FROM orders
             WHERE id = $1
             """,
@@ -363,6 +363,31 @@ async def mark_order_paid(order_id: int) -> bool:
             order_id,
         )
     return bool(row)
+
+async def find_order_by_payment_session_id(session_id: str) -> tuple[dict | None, str | None]:
+    """Find order by stored payment session id (main or revision)."""
+    p = pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, client_id, editor_id, title, description, budget_minor, revision_price_minor, currency, status,
+                   created_at, deadline_at, dispute_opened_at, dispute_opened_by, dispute_client_agree, dispute_editor_agree,
+                   agreed_price_minor, payment_status, payment_link, paid_at,
+                   CASE
+                       WHEN stripe_session_id = $1 THEN 'order'
+                       WHEN revision_stripe_session_id = $1 THEN 'revision'
+                       ELSE NULL
+                   END AS payment_kind
+            FROM orders
+            WHERE stripe_session_id = $1 OR revision_stripe_session_id = $1
+            """,
+            session_id,
+        )
+    if not row:
+        return None, None
+    data = dict(row)
+    payment_kind = data.pop("payment_kind", None)
+    return data, payment_kind
 
 # ---------- Balance and withdrawal functions ----------
 

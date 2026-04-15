@@ -165,15 +165,17 @@ def kb_verify_admin(editor_user_id: int, lang: str | None = None) -> InlineKeybo
     b.adjust(2, 1)
     return b.as_markup()
 
-def kb_mod_verification_controls(user_id: int, offset: int) -> InlineKeyboardMarkup:
+def kb_mod_verification_controls(user_id: int, offset: int, lang: str | None = None) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="✅ Approve", callback_data=f"mod:verifications:approve:{user_id}:{offset}")
-    b.button(text="❌ Reject", callback_data=f"mod:verifications:reject:{user_id}:{offset}")
-    b.button(text="\U0001F4AC \u0427\u0430\u0442", callback_data=f"mod:verifications:chat:{user_id}")
-    b.button(text="⬅️ Назад", callback_data="common:menu")
-    b.button(text="▶️ Следующий", callback_data=f"mod:verifications:page:{offset + 1}")
+    b.button(text=_tr(lang, "? Approve", "? ???????????"), callback_data=f"mod:verifications:approve:{user_id}:{offset}")
+    b.button(text=_tr(lang, "? Reject", "? ?????????"), callback_data=f"mod:verifications:reject:{user_id}:{offset}")
+    b.button(text=_tr(lang, "?? Chat", "?? ???"), callback_data=f"mod:verifications:chat:{user_id}")
+    b.button(text=_tr(lang, "?? Back", "?? ?????"), callback_data="common:menu")
+    b.button(text=_tr(lang, "?? Next", "?? ?????????"), callback_data=f"mod:verifications:page:{offset + 1}")
     b.adjust(2, 1, 2)
     return b.as_markup()
+
+
 
 def kb_mod_held_controls(message_id: int, offset: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
@@ -383,6 +385,7 @@ def kb_mod_deal_payment_menu(order_id: int, lang: str | None = None) -> InlineKe
     b.button(text=_tr(lang, "Chat with editor", "Чат з монтажером"), callback_data=f"mod:deal:chat:editor:{order_id}")
     b.button(text=_tr(lang, "Join chat", "Увійти в чат"), callback_data=f"deal:chat:start:{order_id}")
     b.button(text=_tr(lang, "Refund to client", "Повернути оплату замовнику"), callback_data=f"mod:deal:refund:client:{order_id}")
+    b.button(text=_tr(lang, "Partial refund to client", "???????? ?????????? ???????"), callback_data=f"mod:deal:refund:partial:{order_id}")
     b.button(text=_tr(lang, "Refund to editor", "Повернути оплату монтажеру"), callback_data=f"mod:deal:refund:editor:{order_id}")
     b.button(text=_tr(lang, "50/50 split", "50 на 50"), callback_data=f"mod:deal:split:{order_id}")
     b.button(text=_tr(lang, "Back", "Назад"), callback_data=f"mod:deal:menu:{order_id}")
@@ -541,14 +544,17 @@ def kb_deadline_quick(back: str, cancel: str, lang: str | None = None) -> Inline
 
 
 
-def kb_verify_chat_reply(moderator_user_id: int) -> InlineKeyboardMarkup:
+def kb_verify_chat_reply(moderator_user_id: int, lang: str | None = None) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="💬 Ответить", callback_data=f"verify:chat:reply:{moderator_user_id}")
+    b.button(text=_tr(lang, "?? Reply", "?? ??????????"), callback_data=f"verify:chat:reply:{moderator_user_id}")
     b.adjust(1)
     return b.as_markup()
 
-def kb_verify_chat_controls() -> InlineKeyboardMarkup:
+
+
+def kb_verify_chat_controls(lang: str | None = None) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🚪 Выйти", callback_data="verify:chat:exit")
+    b.button(text=_tr(lang, "?? Exit", "?? ?????"), callback_data="verify:chat:exit")
     b.adjust(1)
     return b.as_markup()
+

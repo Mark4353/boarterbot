@@ -32,7 +32,8 @@ from app.keyboards import (
     kb_mod_deal_menu,
     kb_mod_deal_payment_menu,
 )
-from app.states import ModerationSearch, ModerationUserLookup, ModerationMessage, VerifyChat
+from app.states import ModerationSearch, ModerationUserLookup, ModerationMessage, ModerationRefund, VerifyChat
+from app.payment_api import refund_payment
 from app import texts
 
 router = Router()
@@ -626,11 +627,37 @@ async def mod_deal_refund_client(call: CallbackQuery, state: FSMContext):
         object_type="deal",
         object_id=order_id,
         action_type="refund_client",
-        action_payload={"payment_status": "refunded_client"},
+        action_payload={"payment_status": "refunded_client", "refund_target": "client"},
     )
     await _safe_edit_or_send(
         call,
         _t(user, "✉️ Enter a short reason for refunding the client:", "✉️ Введіть коротку причину повернення коштів замовнику:"),
+        reply_markup=kb_nav_menu_help(back=f"mod:deal:payment:{order_id}", lang=user.language),
+    )
+    await call.answer()
+
+@router.callback_query(F.data.startswith("mod:deal:refund:partial:"))
+async def mod_deal_refund_partial(call: CallbackQuery, state: FSMContext):
+    user = await _ensure_moderator(call)
+    if not user:
+        return
+    try:
+        order_id = int(call.data.split(":")[-1])
+    except ValueError:
+        await call.answer(_t(user, "Invalid order id.", "Некоректний id угоди."), show_alert=True)
+        return
+
+    order = await get_order_by_id(order_id)
+    if not order or not order.get("client_id"):
+        await call.answer(_t(user, "Client not found.", "Замовника не знайдено."), show_alert=True)
+        return
+
+    await state.clear()
+    await state.set_state(ModerationRefund.waiting_amount)
+    await state.update_data(order_id=order_id)
+    await _safe_edit_or_send(
+        call,
+        _t(user, "💰 Enter partial refund amount (USD):", "💰 Введіть суму часткового повернення (USD):"),
         reply_markup=kb_nav_menu_help(back=f"mod:deal:payment:{order_id}", lang=user.language),
     )
     await call.answer()
@@ -690,7 +717,7 @@ async def mod_deal_split(call: CallbackQuery, state: FSMContext):
         object_type="deal",
         object_id=order_id,
         action_type="split_payment",
-        action_payload={"payment_status": "split_50_50"},
+        action_payload={"payment_status": "split_50_50", "refund_target": "split"},
     )
     await _safe_edit_or_send(
         call,
@@ -998,6 +1025,59 @@ async def mod_user_message(call: CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
+@router.message(ModerationRefund.waiting_amount)
+async def mod_refund_amount(message: Message, state: FSMContext):
+    moderator = await _ensure_moderator_message(message)
+    if not moderator:
+        await state.clear()
+        return
+
+    raw = (message.text or "").strip().replace(",", ".")
+    try:
+        amount = float(raw)
+        if amount <= 0:
+            raise ValueError()
+        amount_minor = int(round(amount * 100))
+    except ValueError:
+        await message.answer(_t(moderator, "Enter a valid amount (e.g., 25.50).", "Введіть коректну суму (наприклад, 25.50)."))
+        return
+
+    data = await state.get_data()
+    order_id = data.get("order_id")
+    if not order_id:
+        await state.clear()
+        await message.answer(_t(moderator, "Session expired. Please try again.", "Сесія закінчилась. Спробуйте ще раз."))
+        return
+
+    order = await get_order_by_id(int(order_id))
+    if not order:
+        await state.clear()
+        await message.answer(_t(moderator, "Deal not found.", "Угоду не знайдено."))
+        return
+
+    max_amount = int(order.get("agreed_price_minor") or 0)
+    if amount_minor > max_amount:
+        await message.answer(_t(moderator, "Amount exceeds deal price.", "Сума перевищує ціну угоди."))
+        return
+
+    await state.clear()
+    await state.set_state(ModerationMessage.waiting_text)
+    await state.update_data(
+        target_user_ids=[int(order["client_id"])],
+        object_type="deal",
+        object_id=int(order_id),
+        action_type="refund_client_partial",
+        action_payload={
+            "payment_status": "refunded_partial",
+            "refund_target": "client",
+            "refund_amount_minor": amount_minor,
+        },
+    )
+    await message.answer(
+        _t(moderator, "✉️ Enter a short reason for the partial refund:", "✉️ Введіть коротку причину часткового повернення:"),
+        reply_markup=kb_nav_menu_help(back=f"mod:deal:payment:{order_id}", lang=moderator.language),
+    )
+
 @router.message(ModerationMessage.waiting_text)
 async def mod_send_message(message: Message, state: FSMContext):
     moderator = await _ensure_moderator_message(message)
@@ -1028,34 +1108,62 @@ async def mod_send_message(message: Message, state: FSMContext):
     if object_type == "deal" and object_id:
         await create_deal_message(int(object_id), moderator.id, "moderator", text)
     if object_type == "deal" and action_payload.get("payment_status") and object_id:
+        order = await get_order_by_id(int(object_id))
+        if not order:
+            await state.clear()
+            await message.answer(_t(moderator, "Deal not found.", "Угоду не знайдено."))
+            return
+
+        refund_target = action_payload.get("refund_target")
+        refund_amount_minor = action_payload.get("refund_amount_minor")
+        if refund_target in {"client", "split"}:
+            payment_order_id = order.get("stripe_session_id")
+            if not payment_order_id:
+                await state.clear()
+                await message.answer(_t(moderator, "Payment ID is missing for this deal.", "Відсутній ідентифікатор оплати для цієї угоди."))
+                return
+
+            if refund_amount_minor is None:
+                total_amount = int(order.get("agreed_price_minor") or 0)
+                refund_amount_minor = total_amount if refund_target == "client" else total_amount // 2
+
+            refund_result = await refund_payment(
+                order_id=str(payment_order_id),
+                amount_minor=int(refund_amount_minor),
+                currency=order.get("currency") or "USD",
+            )
+            refund_status = str(refund_result.get("status", "")).lower() if refund_result else ""
+            if not refund_result or refund_status in {"error", "failure"}:
+                await state.clear()
+                await message.answer(_t(moderator, "Refund failed. Please check LiqPay.", "Повернення не вдалося. Перевірте LiqPay."))
+                return
+
         await set_payment_status(int(object_id), action_payload["payment_status"])
 
         # Handle balance adjustments for refunds and splits
-        order = await get_order_by_id(int(object_id))
-        if order:
-            payment_status = action_payload["payment_status"]
-            if payment_status == "refunded_client":
-                # Refund to client - no balance change needed as money goes back to payment system
-                pass
-            elif payment_status == "refunded_editor":
-                # Refund to editor - deduct from our balance if they were already paid
-                if order.get("payment_status") == "paid":
-                    editor_id = order.get("editor_id")
-                    amount = order.get("agreed_price_minor", 0)
-                    if editor_id and amount > 0:
-                        await add_to_balance(editor_id, -amount, "refunded", int(object_id), f"Refunded by moderator: {text}")
-            elif payment_status == "split_50_50":
-                # Split payment - credit both parties with half
-                client_id = order.get("client_id")
+        payment_status = action_payload["payment_status"]
+        if payment_status == "refunded_client":
+            # Refund to client - no balance change needed as money goes back to payment system
+            pass
+        elif payment_status == "refunded_editor":
+            # Refund to editor - deduct from our balance if they were already paid
+            if order.get("payment_status") == "paid":
                 editor_id = order.get("editor_id")
-                total_amount = order.get("agreed_price_minor", 0)
-                half_amount = total_amount // 2
+                amount = order.get("agreed_price_minor", 0)
+                if editor_id and amount > 0:
+                    await add_to_balance(editor_id, -amount, "refunded", int(object_id), f"Refunded by moderator: {text}")
+        elif payment_status == "split_50_50":
+            # Split payment - credit both parties with half
+            client_id = order.get("client_id")
+            editor_id = order.get("editor_id")
+            total_amount = order.get("agreed_price_minor", 0)
+            half_amount = total_amount // 2
 
-                if client_id and editor_id and total_amount > 0:
-                    # Credit client half
-                    await add_to_balance(client_id, half_amount, "split_refund", int(object_id), f"50/50 split by moderator: {text}")
-                    # Credit editor half
-                    await add_to_balance(editor_id, half_amount, "split_payment", int(object_id), f"50/50 split by moderator: {text}")
+            if client_id and editor_id and total_amount > 0:
+                # Credit client half
+                await add_to_balance(client_id, half_amount, "split_refund", int(object_id), f"50/50 split by moderator: {text}")
+                # Credit editor half
+                await add_to_balance(editor_id, half_amount, "split_payment", int(object_id), f"50/50 split by moderator: {text}")
 
     await log_moderation_action(
         moderator_user_id=moderator.id,

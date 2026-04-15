@@ -81,14 +81,7 @@ async def cb_menu(call: CallbackQuery, state: FSMContext):
         return
 
     # Заглушки / проверки:
-    if call.data == "common:balance":
-            await send_clean_from_call(
-                call,
-                state,
-                texts.tr(user.language, "💳 Balance: coming soon.", "💳 Баланс: скоро буде."),
-                reply_markup=await get_menu_markup_for_user(user),
-            )
-    elif call.data == "common:vip":
+    if call.data == "common:vip":
         await send_clean_from_call(
             call,
             state,
